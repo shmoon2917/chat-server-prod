@@ -10,7 +10,6 @@ const {
   readRefreshToken,
   saveRefreshTokenAsFile,
 } = require("./utils");
-const {clientId, clientSecret} = require("./config");
 
 // application/x-www-form-urlencoded
 app.use(bodyParser.urlencoded({extended: true}));
@@ -22,11 +21,7 @@ app.use(cors({origin: true}));
 
 const service = google.youtube("v3");
 
-const oauth2Client = new google.auth.OAuth2(
-  clientId,
-  clientSecret,
-  "https://testchat-292012.web.app/api/oauth2callback"
-);
+const oauth2Client = new google.auth.OAuth2("", "", "");
 
 const scopes = [
   "https://www.googleapis.com/auth/youtube",
@@ -42,6 +37,7 @@ const authorizeUrl = oauth2Client.generateAuthUrl({
   access_type: "offline",
   scope: scopes,
 });
+
 (async function () {
   try {
     const exists = await existsRefreshTokenFile();
@@ -94,37 +90,9 @@ app.get("/api/oauth2callback", async (req, res) => {
   }
 });
 
-app.get("/api/playlists", async (req, res) => {
-  try {
-    const {data, status} = await service.playlists.list({
-      part: "id, snippet",
-      channelId: "UCXiFDw7tbIrFCuuIF6389DA",
-      fields: "items(id,snippet(title,description))",
-      maxResults: 50,
-    });
-
-    if (status === 200) {
-      return res.status(200).json({
-        success: true,
-        data,
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        data,
-      });
-    }
-  } catch (e) {
-    return res.status(400).json({
-      success: false,
-      error: e,
-    });
-  }
-});
-
 const getPlayLists = async () => {
   try {
-    console.time("get playlists");
+    // console.time("get playlists");
     const {data, status} = await service.playlists.list({
       part: "id, snippet",
       channelId: "UCUBQ25uOs-fbEb9gr4gtxcw",
@@ -141,44 +109,39 @@ const getPlayLists = async () => {
         );
       }
 
-      console.timeEnd("get playlists");
+      // console.timeEnd("get playlists");
       return hvoLists;
     } else {
-      console.timeEnd("get playlists");
+      // console.timeEnd("get playlists");
       return null;
     }
   } catch (e) {
-    console.timeEnd("get playlists & error occured");
+    // console.timeEnd("get playlists");
     throw e;
   }
 };
 
-const getPlayListItems = async (playlistId) => {
+const getPlayListItems = async (query) => {
   try {
-    console.time("get playlistItem");
-    const {data, status} = await service.playlistItems.list({
-      part: "id",
-      playlistId,
-      fields: "pageInfo",
-      maxResults: 1,
-    });
+    // console.time("get playlistItems");
+    const {data, status} = await service.playlistItems.list(query);
 
     if (status === 200) {
-      console.timeEnd("get playlistItem");
-      return data.pageInfo.totalResults;
+      // console.timeEnd("get playlistItems");
+      return data;
     } else {
-      console.timeEnd("get playlistItem");
+      // console.timeEnd("get playlistItems");
       return null;
     }
   } catch (e) {
-    console.timeEnd("get playlistItem & error occured");
+    // console.timeEnd("get playlistItems");
     throw e;
   }
 };
 
 const addPlayList = async (hvoListsLength) => {
   try {
-    console.time("insert playlist");
+    // console.time("insert playlist");
     const response = await service.playlists.insert({
       part: "id, snippet, status",
       requestBody: {
@@ -194,18 +157,19 @@ const addPlayList = async (hvoListsLength) => {
       },
     });
     if (response.status === 200) {
-      console.timeEnd("insert list");
+      // console.timeEnd("insert list");
       return response.data;
     } else {
+      // console.timeEnd("insert list");
       return null;
     }
   } catch (e) {
-    console.timeEnd("insert list & error occured");
+    // console.timeEnd("insert list");
     throw e;
   }
 };
 
-app.post("/api/playlistItems", async (req, res) => {
+app.post("/api/playlistItem", async (req, res) => {
   if (!req.body.videoId) {
     return res.status(400).json({success: false});
   }
@@ -214,22 +178,39 @@ app.post("/api/playlistItems", async (req, res) => {
 
   try {
     const hvoLists = await getPlayLists();
+
+    if (hvoLists === null) {
+      return res.status(400).json({
+        success: false,
+      });
+    }
     let latestHvoList = {
       id: hvoLists[0].id,
       title: hvoLists[0].snippet.title,
       description: hvoLists[0].snippet.description,
     };
 
-    let hvoItemsLength = await getPlayListItems(latestHvoList.id);
-    if (hvoItemsLength >= 200) {
+    const hvoItemsData = await getPlayListItems({
+      part: "id",
+      playlistId: latestHvoList.id,
+      fields: "pageInfo",
+      maxResults: 1,
+    });
+
+    if (hvoItemsData === null) {
+      return res.status(400).json({
+        success: false,
+      });
+    }
+
+    if (hvoItemsData.pageInfo.totalResults >= 200) {
       const {id, snippet} = await addPlayList(hvoLists.length);
       latestHvoList.id = id;
       latestHvoList.title = snippet.title;
       latestHvoList.description = snippet.description;
-      hvoItemsLength = 0;
     }
 
-    console.time("insert playlistItem");
+    // console.time("insert playlistItem");
     const {status, data} = await service.playlistItems.insert({
       part: "id, snippet",
       requestBody: {
@@ -244,29 +225,113 @@ app.post("/api/playlistItems", async (req, res) => {
     });
 
     if (status === 200) {
-      console.timeEnd("insert playlistItem");
+      // console.timeEnd("insert playlistItem");
       return res.status(200).json({
         success: true,
         data: {
           playlist: {
             ...latestHvoList,
-            itemsLength: hvoItemsLength,
           },
           video: {
-            id: videoId,
+            id: data.videoId,
             title: data.snippet.title,
+            // description: data.snippet.description,
             thumbnailUrl: data.snippet.thumbnails.default.url,
           },
         },
       });
     } else {
-      console.timeEnd("insert playlistItem");
+      // console.timeEnd("insert playlistItem");
       return res.status(400).json({
         success: false,
       });
     }
   } catch (e) {
-    console.timeEnd("insert playlistItem & error occured");
+    // console.timeEnd("insert playlistItem");
+    console.log("The API returned a error : " + e);
+    return res.status(400).json({
+      success: false,
+      error: e,
+    });
+  }
+});
+
+app.get("/api/playListItem", async (req, res) => {
+  const isRandom = req.query.random;
+  try {
+    const hvoLists = await getPlayLists();
+    if (isRandom === "true") {
+      const listRandomIndex = Math.floor(Math.random() * hvoLists.length);
+      const selectedHvoList = hvoLists[listRandomIndex];
+
+      let keep = true,
+        first = true,
+        hvoItemsLength = 0,
+        itemRandomIndex = 0,
+        randomHvoItem = null,
+        npt = "";
+
+      while (keep) {
+        let hvoItemsData = await getPlayListItems({
+          part: "id",
+          playlistId: selectedHvoList.id,
+          fields: "pageInfo, items(id), nextPageToken",
+          maxResults: 50,
+          pageToken: npt ? npt : "",
+        });
+
+        if (first) {
+          hvoItemsLength = hvoItemsData.pageInfo.totalResults;
+          itemRandomIndex = Math.floor(Math.random() * hvoItemsLength);
+        }
+
+        if (itemRandomIndex >= 50) {
+          itemRandomIndex -= 50;
+          npt = hvoItemsData.nextPageToken;
+          first = false;
+        } else {
+          randomHvoId = hvoItemsData.items[itemRandomIndex].id;
+          keep = false;
+        }
+      }
+
+      if (randomHvoId) {
+        const randomHvoItemDetail = await getPlayListItems({
+          part: "id, snippet",
+          id: randomHvoId,
+          fields: "items(id,snippet(title,resourceId(videoId)))",
+        });
+
+        if (randomHvoItemDetail.items[0]) {
+          return res.status(200).json({
+            success: true,
+            data: {
+              playlist: selectedHvoList,
+              playlistItem: {
+                id: randomHvoItemDetail.items[0].snippet.resourceId.videoId,
+                title: randomHvoItemDetail.items[0].snippet.title,
+              },
+            },
+          });
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "에러 발생",
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "에러 발생",
+        });
+      }
+    } else {
+      return res.status(200).json({
+        success: false,
+        message: "아직 구현 하지 않음",
+      });
+    }
+  } catch (e) {
     console.log("The API returned a error : " + e);
     return res.status(400).json({
       success: false,
